@@ -3,10 +3,10 @@ Description=PICO Foxweb Service
 After=network.target 
 
 [Service]
-ExecStart=/usr/local/sbin/PICOFoxweb 8080
+ExecStart=/usr/local/sbin/PICOFoxweb 8080 /var/www/foxweb/webroot
 KillMode=process
-User=picofoxweb
-Group=picofoxweb
+User=root
+Group=root
 
 [Install]
 WantedBy=multi-user.target

@@ -227,3 +227,21 @@ void respond(int slot) {
 
   free(buf);
 }
+
+void log_request(const char *method, const char *uri, int status, int response_size) {
+    FILE *log_file = fopen(LOG_FILE, "a");
+    if (!log_file) {
+        syslog(LOG_ERR, "Failed to open log file");
+        return;
+    }
+
+    time_t now = time(NULL);
+    struct tm *tm_info = localtime(&now);
+    char timestamp[32];
+    strftime(timestamp, 32, "%d/%b/%Y:%H:%M:%S %z", tm_info);
+
+    fprintf(log_file, "%s - - [%s] \"%s %s HTTP/1.1\" %d %d \"%s\" \"%s\"\n",
+            request_header("X-Forwarded-For") ? request_header("X-Forwarded-For") : "127.0.0.1", timestamp, method, uri, status, response_size, request_header("Referer") ? request_header("Referer") : "-", request_header("User-Agent") ? request_header("User-Agent") : "-");
+
+    fclose(log_file);
+}

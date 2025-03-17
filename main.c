@@ -1,35 +1,26 @@
 #include "httpd.h"
+#include "auth.h"
 #include <sys/stat.h>
 #include <stdio.h>
+#include <syslog.h>
 
 #define CHUNK_SIZE 1024 // read 1024 bytes at a time
 
 // Public directory settings
-#define PUBLIC_DIR "/var/www/foxweb/webroot"
 #define INDEX_HTML "/index.html"
 #define NOT_FOUND_HTML "/404.html"
-#define LOG_FILE "/var/log/foxweb.log"
 
-void log_request(const char *method, const char *uri, int status, int response_size) {
-    FILE *log_file = fopen(LOG_FILE, "a");
-    if (!log_file) {
-        syslog(LOG_ERR, "Failed to open log file");
-        return;
-    }
-
-    time_t now = time(NULL);
-    struct tm *tm_info = localtime(&now);
-    char timestamp[32];
-    strftime(timestamp, 32, "%d/%b/%Y:%H:%M:%S %z", tm_info);
-
-    fprintf(log_file, "%s - - [%s] \"%s %s HTTP/1.1\" %d %d \"%s\" \"%s\"\n",
-            request_header("X-Forwarded-For") ? request_header("X-Forwarded-For") : "127.0.0.1", timestamp, method, uri, status, response_size, request_header("Referer") ? request_header("Referer") : "-", request_header("User-Agent") ? request_header("User-Agent") : "-");
-
-    fclose(log_file);
-}
+char PUBLIC_DIR[255] = "./webroot";
 
 int main(int c, char **v) {
-  char *port = c == 1 ? "8000" : v[1];
+  char *port = (c > 1) ? v[1] : "8000";
+
+  if (c > 2) {
+    strncpy(PUBLIC_DIR, v[2], sizeof(PUBLIC_DIR) - 1);
+    PUBLIC_DIR[sizeof(PUBLIC_DIR) - 1] = '\0';
+  }
+
+  syslog(LOG_INFO, "Starting server on port %s with root directory: %s\n", port, PUBLIC_DIR);
   serve_forever(port);
   return 0;
 }
@@ -41,6 +32,13 @@ int file_exists(const char *file_name) {
   exists = (stat(file_name, &buffer) == 0);
 
   return exists;
+}
+
+int read_file_size(const char *file_name) {
+  struct stat st;
+  if (stat(file_name, &st) == 0)
+    return st.st_size;
+  return -1;
 }
 
 int read_file(const char *file_name) {
@@ -61,59 +59,86 @@ int read_file(const char *file_name) {
   return err;
 }
 
+void route_check_auth(const char *auth_header) {
+    if (!check_auth(auth_header)) {
+      int lenght = HTTP_401;
+      log_request("GET", "/", 401, lenght);
+      return;
+    }
+}
+
 void route() {
   ROUTE_START()
 
   GET("/") {
-    char index_html[20];
+    const char *auth_header = request_header("Authorization");
+
+    route_check_auth(auth_header);
+
+    char index_html[32];
     sprintf(index_html, "%s%s", PUBLIC_DIR, INDEX_HTML);
 
-    HTTP_200;
+    int lenght = HTTP_200;
     if (file_exists(index_html)) {
+      lenght += read_file_size(index_html);
       read_file(index_html);
-      log_request("GET", "/", 200, CHUNK_SIZE);
+      log_request("GET", "/", 200, lenght);
     } else {
-      printf("Hello! You are using %s\n\n", request_header("User-Agent"));
-      log_request("GET", "/", 200, 0);
+      lenght += printf("Hello! You are using %s\n\n", request_header("User-Agent"));
+      log_request("GET", "/", 200, lenght);
     }
   }
 
   GET("/test") {
-    HTTP_200;
-    printf("List of request headers:\n\n");
+    const char *auth_header = request_header("Authorization");
+
+    route_check_auth(auth_header);
+
+    int lenght = HTTP_200;
+    lenght += printf("List of request headers:\n\n");
 
     header_t *h = request_headers();
 
     while (h->name) {
-      printf("%s: %s\n", h->name, h->value);
+      lenght += printf("%s: %s\n", h->name, h->value);
       h++;
     }
-    log_request("GET", "/test", 200, 0);
+    log_request("GET", "/test", 200, lenght);
   }
 
   POST("/") {
-    HTTP_201;
-    printf("Wow, seems that you POSTed %d bytes.\n", payload_size);
-    printf("Fetch the data using `payload` variable.\n");
+    const char *auth_header = request_header("Authorization");
+
+    route_check_auth(auth_header);
+
+    int lenght = HTTP_201;
+    lenght += printf("Wow, seems that you POSTed %d bytes.\n", payload_size);
+    lenght += printf("Fetch the data using `payload` variable.\n");
     if (payload_size > 0)
-      printf("Request body: %s", payload);
-    log_request("POST", "/", 201, payload_size);
+      lenght += printf("Request body: %s", payload);
+    log_request("POST", "/", 201, lenght);
   }
 
   GET(uri) {
+    const char *auth_header = request_header("Authorization");
+
+    route_check_auth(auth_header);
+
     char file_name[255];
     sprintf(file_name, "%s%s", PUBLIC_DIR, uri);
 
     if (file_exists(file_name)) {
-      HTTP_200;
+      int lenght = HTTP_200 + read_file_size(file_name);
       read_file(file_name);
-      log_request("GET", uri, 200, CHUNK_SIZE);
+      log_request("GET", uri, 200, lenght);
     } else {
-      HTTP_404;
+      int lenght = HTTP_404;
       sprintf(file_name, "%s%s", PUBLIC_DIR, NOT_FOUND_HTML);
-      if (file_exists(file_name))
+      if (file_exists(file_name)) {
+        lenght += read_file_size(file_name);
         read_file(file_name);
-      log_request("GET", uri, 404, 0);
+      }
+      log_request("GET", uri, 404, lenght);
     }
   }
 
