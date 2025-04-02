@@ -24,8 +24,9 @@ install: PICOFoxweb
 	mkdir -p /var/www/foxweb
 	cp -r webroot -t /var/www/foxweb/
 	chown -R root:root /var/www/foxweb
+	chmod -R 750 /var/www/foxweb
 	touch /var/log/foxweb.log
-	chown root:root /var/log/foxweb.log
+	chmod 777 /var/log/foxweb.log
 	install -o root -g root -m 0644 picofoxweb.pam /etc/pam.d/picofoxweb
 
 uninstall:
